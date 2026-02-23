@@ -188,13 +188,7 @@ jobs:
           echo ""
           
           # 执行分析
-          if [ "$MODE" = "market-only" ]; then
-            python main.py --market-review
-          elif [ "$MODE" = "stocks-only" ]; then
-            python main.py --no-market-review
-          else
-            python main.py
-          fi
+          python main.py --no-market-review
       
       - name: 上传分析报告
         uses: actions/upload-artifact@v4
