@@ -49,9 +49,70 @@ from src.core.market_review import run_market_review
 from src.webui_frontend import prepare_webui_frontend_assets
 from src.config import get_config, Config
 from src.logging_config import setup_logging
+from src.stock_name_resolver import StockNameResolver
 
 
 logger = logging.getLogger(__name__)
+
+
+def _build_stock_display_name_map(stock_codes: List[str]) -> dict:
+    """
+    根据股票代码构建标准中文名映射。
+    例：
+        600519 -> 贵州茅台
+        000001 -> 平安银行
+    """
+    resolver = StockNameResolver()
+    mapping = {}
+
+    for code in stock_codes or []:
+        norm_code = canonical_stock_code(code)
+        canonical_name = resolver.get_canonical_name(norm_code, fallback=norm_code)
+        mapping[norm_code] = canonical_name
+
+    return mapping
+
+
+def _repair_result_stock_names(results) -> None:
+    """
+    对 pipeline 返回的结果对象进行保底修正：
+    - 如果 result.name 错了，用标准股票名覆盖
+    - 如果 result.full_analysis / result.analysis / result.report / result.content 存在，也尝试修正文案
+    """
+    resolver = StockNameResolver()
+
+    if not results:
+        return
+
+    for r in results:
+        try:
+            code = canonical_stock_code(getattr(r, "code", "") or "")
+            if not code:
+                continue
+
+            old_name = getattr(r, "name", None)
+            canonical_name = resolver.get_canonical_name(code, fallback=old_name or code)
+
+            # 1) 强制修正结果对象中的股票名
+            if hasattr(r, "name") and old_name != canonical_name:
+                logger.warning(
+                    "检测到股票名称与代码不一致，已自动修正: code=%s, old_name=%s, new_name=%s",
+                    code,
+                    old_name,
+                    canonical_name,
+                )
+                r.name = canonical_name
+
+            # 2) 如果对象里有长文本字段，也尝试修正
+            for attr in ["full_analysis", "analysis", "report", "content"]:
+                if hasattr(r, attr):
+                    old_text = getattr(r, attr, None)
+                    if isinstance(old_text, str) and old_text.strip():
+                        new_text = resolver.repair_text(code, old_text)
+                        setattr(r, attr, new_text)
+
+        except Exception as e:
+            logger.warning("修正股票名称时发生异常，已忽略: %s", e)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -285,6 +346,11 @@ def run_full_analysis(
             logger.info("今日休市股票已跳过: %s", skipped)
         stock_codes = filtered_codes
 
+        # 根据股票代码建立标准中文名映射，便于日志核对
+        stock_name_map = _build_stock_display_name_map(stock_codes)
+        if stock_name_map:
+            logger.info("本次分析股票标准名称映射: %s", stock_name_map)
+
         # 命令行参数 --single-notify 覆盖配置（#55）
         if getattr(args, 'single_notify', False):
             config.single_stock_notify = True
@@ -317,6 +383,9 @@ def run_full_analysis(
             send_notification=not args.no_notify,
             merge_notification=merge_notification
         )
+
+        # 保底修正 AI 输出中的错股票名，确保名称和代码一致
+        _repair_result_stock_names(results)
 
         # Issue #128: 分析间隔 - 在个股分析和大盘分析之间添加延迟
         analysis_delay = getattr(config, 'analysis_delay', 0)
@@ -445,7 +514,7 @@ def run_full_analysis(
 def start_api_server(host: str, port: int, config: Config) -> None:
     """
     在后台线程启动 FastAPI 服务
-    
+
     Args:
         host: 监听地址
         port: 监听端口
@@ -473,6 +542,7 @@ def _is_truthy_env(var_name: str, default: str = "true") -> bool:
     """Parse common truthy / falsy environment values."""
     value = os.getenv(var_name, default).strip().lower()
     return value not in {"0", "false", "no", "off"}
+
 
 def start_bot_stream_clients(config: Config) -> None:
     """Start bot stream clients when enabled in config."""
