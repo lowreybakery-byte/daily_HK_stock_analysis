@@ -31,7 +31,7 @@ concurrency:
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 600
+    timeout-minutes: 900
 
     steps:
       - name: 随机延迟（避免固定时间访问）
