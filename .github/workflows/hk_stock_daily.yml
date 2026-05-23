@@ -1,17 +1,10 @@
 name: Daily HK Stock Analysis Radar
 
 on:
-  # 定时触发任务
   schedule:
-    # 这里的 cron 是 UTC 时间。
-    # 08:30 UTC 对应北京/香港时间下午 16:30（港股收盘后半小时执行）
-    # 每天无间断执行，方便你持续复盘
     - cron: '30 8 * * *'
-  
-  # 允许在 GitHub 网页上手动点击按钮触发
   workflow_dispatch:
 
-# 赋予 GitHub Actions 写入权限，以便把生成的报告推送到仓库
 permissions:
   contents: write
 
@@ -21,32 +14,27 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      # 这里升级到了 v4
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      # 这里升级到了 v5
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        # 安装我们量化模型需要的依赖包
         pip install pandas numpy tqcenter
-        # 如果你后续在主程序里加了其他包（比如 requests 请求新闻），请一并加在这里
 
     - name: Run daily HK stock quantitative scan
       run: python daily_HK_stock_analysis.py
 
     - name: Commit and push generated report (Keepalive)
       run: |
-        # 配置一个虚拟的 Git 机器人身份
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action Bot"
-        
-        # 把刚才 Python 脚本生成的 markdown 报告添加到暂存区
         git add daily_report_*.md
-        
-        # 提交并推送到仓库。如果有新报告就提交，没有变化就不报错继续运行
         git commit -m "Auto-generate daily HK stock report and keep workflow alive" || echo "No changes to commit"
         git push
