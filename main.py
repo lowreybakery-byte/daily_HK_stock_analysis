@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ===================================
-A股自选股智能分析系统 - 主调度程序
+港股自选股智能分析系统 - 主调度程序
 ===================================
 
 职责：
@@ -118,7 +118,7 @@ def _repair_result_stock_names(results) -> None:
 def parse_arguments() -> argparse.Namespace:
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description='A股自选股智能分析系统',
+        description='港股自选股智能分析系统',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 示例:
@@ -307,7 +307,7 @@ def _compute_trading_day_filter(
 
     if config.market_review_enabled and not getattr(args, 'no_market_review', False):
         effective_region = compute_effective_region(
-            getattr(config, 'market_review_region', 'cn') or 'cn', open_markets
+            getattr(config, 'market_review_region', 'hk') or 'hk', open_markets
         )
     else:
         effective_region = None
@@ -594,7 +594,7 @@ def main() -> int:
     setup_logging(log_prefix="stock_analysis", debug=args.debug, log_dir=config.log_dir)
 
     logger.info("=" * 60)
-    logger.info("A股自选股智能分析系统 启动")
+    logger.info("港股自选股智能分析系统 启动")
     logger.info(f"运行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info("=" * 60)
 
@@ -690,7 +690,7 @@ def main() -> int:
                 from src.core.trading_calendar import get_open_markets_today, compute_effective_region as _compute_region
                 open_markets = get_open_markets_today()
                 effective_region = _compute_region(
-                    getattr(config, 'market_review_region', 'cn') or 'cn', open_markets
+                    getattr(config, 'market_review_region', 'hk') or 'hk', open_markets
                 )
                 if effective_region == '':
                     logger.info("今日大盘复盘相关市场均为非交易日，跳过执行。可使用 --force-run 强制执行。")
