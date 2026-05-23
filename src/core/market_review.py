@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 ===================================
-股票智能分析系统 - 大盘复盘模块（支持 A 股 / 美股）
+股票智能分析系统 - 大盘复盘模块（支持 港股 / 美股）
 ===================================
 
 职责：
-1. 根据 MARKET_REVIEW_REGION 配置选择市场区域（cn / us / both）
+1. 根据 MARKET_REVIEW_REGION 配置选择市场区域（hk / us / both）
 2. 执行大盘复盘分析并生成复盘报告
 3. 保存和发送复盘报告
 """
@@ -51,27 +51,27 @@ def run_market_review(
     region = (
         override_region
         if override_region is not None
-        else (getattr(config, 'market_review_region', 'cn') or 'cn')
+        else (getattr(config, 'market_review_region', 'hk') or 'hk')
     )
-    if region not in ('cn', 'us', 'both'):
-        region = 'cn'
+    if region not in ('hk', 'cn', 'us', 'both'):
+        region = 'hk'
 
     try:
         if region == 'both':
-            # 顺序执行 A 股 + 美股，合并报告
-            cn_analyzer = MarketAnalyzer(
-                search_service=search_service, analyzer=analyzer, region='cn'
+            # 顺序执行 港股 + 美股，合并报告
+            hk_analyzer = MarketAnalyzer(
+                search_service=search_service, analyzer=analyzer, region='hk'
             )
             us_analyzer = MarketAnalyzer(
                 search_service=search_service, analyzer=analyzer, region='us'
             )
-            logger.info("生成 A 股大盘复盘报告...")
-            cn_report = cn_analyzer.run_daily_review()
+            logger.info("生成港股大盘复盘报告...")
+            hk_report = hk_analyzer.run_daily_review()
             logger.info("生成美股大盘复盘报告...")
             us_report = us_analyzer.run_daily_review()
             review_report = ''
-            if cn_report:
-                review_report = f"# A股大盘复盘\n\n{cn_report}"
+            if hk_report:
+                review_report = f"# 港股大盘复盘\n\n{hk_report}"
             if us_report:
                 if review_report:
                     review_report += "\n\n---\n\n> 以下为美股大盘复盘\n\n"
