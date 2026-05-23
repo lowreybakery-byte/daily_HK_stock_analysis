@@ -32,6 +32,10 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     timeout-minutes: 900
+    
+    # 赋予自动提交代码防休眠的权限
+    permissions:
+      contents: write
 
     steps:
       - name: 随机延迟（避免固定时间访问）
@@ -94,13 +98,16 @@ jobs:
           EMAIL_SENDER: ${{ vars.EMAIL_SENDER || secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECEIVERS: ${{ vars.EMAIL_RECEIVERS || secrets.EMAIL_RECEIVERS }}
-          EMAIL_SENDER_NAME: ${{ vars.EMAIL_SENDER_NAME || secrets.EMAIL_SENDER_NAME || 'daily_stock_analysis股票分析助手' }}
+          EMAIL_SENDER_NAME: ${{ vars.EMAIL_SENDER_NAME || secrets.EMAIL_SENDER_NAME || 'daily_stock_analysis港股分析助手' }}
 
           # ==========================================
-          # 自选股配置
+          # 自选股配置 (强制规范港股格式)
           # ==========================================
-          STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST || '600519' }}
-          MARKET_REVIEW_REGION: ${{ vars.MARKET_REVIEW_REGION || secrets.MARKET_REVIEW_REGION || 'cn' }}
+          # 👇 提示：如果你在 GitHub Variables 里设置了 STOCK_LIST，请务必确保格式带有 hk 前缀（如 hk00700），这样名字才不会错！
+          STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST || 'hk00700,hk09988' }}
+          
+          # 👇 修改：将市场强行指定为港股 (hk)
+          MARKET_REVIEW_REGION: ${{ vars.MARKET_REVIEW_REGION || secrets.MARKET_REVIEW_REGION || 'hk' }}
 
           # ==========================================
           # 运行配置
@@ -109,7 +116,9 @@ jobs:
           SINGLE_STOCK_NOTIFY: ${{ vars.SINGLE_STOCK_NOTIFY || secrets.SINGLE_STOCK_NOTIFY || 'false' }}
           MARKET_REVIEW_ENABLED: ${{ vars.MARKET_REVIEW_ENABLED || secrets.MARKET_REVIEW_ENABLED || 'true' }}
           ANALYSIS_DELAY: ${{ vars.ANALYSIS_DELAY || secrets.ANALYSIS_DELAY || '0' }}
-          TRADING_DAY_CHECK_ENABLED: ${{ vars.TRADING_DAY_CHECK_ENABLED || secrets.TRADING_DAY_CHECK_ENABLED || 'true' }}
+          
+          # 👇 无视休市强制运行
+          TRADING_DAY_CHECK_ENABLED: ${{ vars.TRADING_DAY_CHECK_ENABLED || secrets.TRADING_DAY_CHECK_ENABLED || 'false' }}
 
           # ==========================================
           # 系统配置
@@ -117,11 +126,10 @@ jobs:
           LOG_LEVEL: INFO
           MAX_WORKERS: ${{ vars.MAX_WORKERS || secrets.MAX_WORKERS || '1' }}
 
-          # GitHub Actions 环境建议关闭不稳定的数据源
           ENABLE_CHIP_DISTRIBUTION: 'false'
 
-          # 实时行情数据源优先级
-          REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'tencent,akshare_sina,efinance,akshare_em' }}
+          # 👇 修改：针对港股，把 tencent 和 efinance 优先级提上来，减少名称识别错误
+          REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'tencent,efinance,akshare_sina,akshare_em' }}
 
         run: |
           set -e
@@ -129,11 +137,11 @@ jobs:
           MODE="${{ github.event.inputs.mode || 'full' }}"
 
           echo "=========================================="
-          echo "🚀 A股自选股智能分析系统"
+          echo "🚀 港股自选股智能分析系统"
           echo "=========================================="
           echo "⏰ 时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
           echo "🎯 运行模式: $MODE"
-          echo "📊 自选股: $STOCK_LIST"
+          echo "📊 港股自选: $STOCK_LIST"
           echo "📝 报告类型: $REPORT_TYPE"
           echo ""
           echo "=========================================="
@@ -199,5 +207,8 @@ jobs:
             echo "📜 最近日志（最后 30 行）:"
             tail -30 logs/stock_analysis_*.log 2>/dev/null || echo "无日志"
           fi
-          - name: Keepalive Workflow
-          uses: gautamkrishnar/keepalive-workflow@v2
+
+      # 自动防休眠步骤（保持 GitHub Actions 活跃）
+      - name: Keepalive Workflow
+        uses: gautamkrishnar/keepalive-workflow@v2
+        if: always()
