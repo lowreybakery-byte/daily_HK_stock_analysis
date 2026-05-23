@@ -208,7 +208,3 @@ jobs:
             tail -30 logs/stock_analysis_*.log 2>/dev/null || echo "无日志"
           fi
 
-      # 自动防休眠步骤（保持 GitHub Actions 活跃）
-      - name: Keepalive Workflow
-        uses: gautamkrishnar/keepalive-workflow@v2
-        if: always()
