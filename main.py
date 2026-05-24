@@ -2,9 +2,11 @@
 import os
 import argparse
 import logging
+import sys
 import time
 import uuid
 from datetime import datetime
+from typing import List, Optional, Tuple # 补全了这里
 
 from src.config import get_config, Config
 from src.logging_config import setup_logging
@@ -12,6 +14,7 @@ from src.core.pipeline import StockAnalysisPipeline
 from src.core.market_review import run_market_review
 from data_provider.base import canonical_stock_code
 
+# 初始化日志配置
 logger = logging.getLogger(__name__)
 
 def parse_arguments() -> argparse.Namespace:
@@ -86,6 +89,7 @@ def main() -> int:
     
     logger.info("港股分析系统已启动")
     
+    # 转换股票代码列表
     stock_codes = [canonical_stock_code(c) for c in args.stocks.split(',')] if args.stocks else None
     
     try:
