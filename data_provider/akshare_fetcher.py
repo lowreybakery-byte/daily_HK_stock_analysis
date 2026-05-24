@@ -4,7 +4,6 @@
 AkshareFetcher - 主数据源 (Priority 1)
 ===================================
 """
-
 import logging
 import os
 import random
@@ -25,7 +24,8 @@ from tenacity import (
 
 from patch.eastmoney_patch import eastmoney_patch
 from src.config import get_config
-# --- 修复导入：从 base 移除 RateLimitError 并在此处本地定义 ---
+
+# --- 关键修复：从 base 移除 RateLimitError 并在此处本地定义 ---
 from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS, is_bse_code, is_st_stock, is_kc_cy_stock, normalize_stock_code
 
 class RateLimitError(DataFetchError): pass
@@ -36,6 +36,9 @@ from .realtime_types import (
     safe_float, safe_int
 )
 from .us_index_mapping import is_us_index_code, is_us_stock_code
+
+# 保留旧的 RealtimeQuote 别名，用于向后兼容
+RealtimeQuote = UnifiedRealtimeQuote
 
 def _is_hk_code(stock_code: str) -> bool:
     """
