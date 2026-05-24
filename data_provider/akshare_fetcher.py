@@ -1,56 +1,7 @@
-# -*- coding: utf-8 -*-
-"""
-===================================
-AkshareFetcher - 主数据源 (Priority 1)
-===================================
+复制指南：
+完整覆盖：将上述代码粘贴进 src/data_provider/akshare_fetcher.py 的最顶部。
 
-数据来源：
-1. 东方财富爬虫（通过 akshare 库） - 默认数据源
-2. 新浪财经接口 - 备选数据源
-3. 腾讯财经接口 - 备选数据源
-
-特点：免费、无需 Token、数据全面
-风险：爬虫机制易被反爬封禁
-
-防封禁策略：
-1. 每次请求前随机休眠 2-5 秒
-2. 随机轮换 User-Agent
-3. 使用 tenacity 实现指数退避重试
-4. 熔断器机制：连续失败后自动冷却
-
-增强数据：
-- 实时行情：量比、换手率、市盈率、市净率、总市值、流通市值
-- 筹码分布：获利比例、平均成本、筹码集中度
-"""
-
-import logging
-import os
-import random
-import time
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Optional, Dict, Any, List, Tuple
-
-import pandas as pd
-import requests
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type,
-    before_sleep_log,
-)
-
-from patch.eastmoney_patch import eastmoney_patch
-from src.config import get_config
-from .base import BaseFetcher, DataFetchError, RateLimitError, STANDARD_COLUMNS, is_bse_code, is_st_stock, is_kc_cy_stock, normalize_stock_code
-from .realtime_types import (
-    UnifiedRealtimeQuote, ChipDistribution, RealtimeSource,
-    get_realtime_circuit_breaker, get_chip_circuit_breaker,
-    safe_float, safe_int  # 使用统一的类型转换函数
-)
-from .us_index_mapping import is_us_index_code, is_us_stock_code
-
+连接后续部分：请紧接着粘贴你原文件里从第 54 行（即 USER_AGENTS = [...]）开始到最后的所有内容。
 
 # 保留旧的 RealtimeQuote 别名，用于向后兼容
 RealtimeQuote = UnifiedRealtimeQuote
