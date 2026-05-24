@@ -178,6 +178,11 @@ class DataFetcherManager:
         self._fetchers = [EfinanceFetcher(), AkshareFetcher(), YfinanceFetcher()]
         self._fetchers.sort(key=lambda f: f.priority)
     
+    def get_stock_name(self, stock_code: str) -> str:
+        """从映射表中获取股票名称"""
+        code = stock_code.strip().upper()
+        return STOCK_NAME_MAP.get(code, code)
+
     def get_daily_data(self, stock_code: str, start_date: Optional[str] = None, end_date: Optional[str] = None, days: int = 30) -> Tuple[pd.DataFrame, str]:
         stock_code = normalize_stock_code(stock_code)
         for fetcher in self._fetchers:
