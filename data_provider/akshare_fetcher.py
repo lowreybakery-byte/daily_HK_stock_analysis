@@ -1,65 +1,41 @@
-复制指南：
-完整覆盖：将上述代码粘贴进 src/data_provider/akshare_fetcher.py 的最顶部。
+# -*- coding: utf-8 -*-
+"""
+===================================
+AkshareFetcher - 主数据源 (Priority 1)
+===================================
+"""
 
-连接后续部分：请紧接着粘贴你原文件里从第 54 行（即 USER_AGENTS = [...]）开始到最后的所有内容。
+import logging
+import os
+import random
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Optional, Dict, Any, List, Tuple
 
-# 保留旧的 RealtimeQuote 别名，用于向后兼容
-RealtimeQuote = UnifiedRealtimeQuote
+import pandas as pd
+import requests
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
 
+from patch.eastmoney_patch import eastmoney_patch
+from src.config import get_config
+# --- 修复导入：从 base 移除 RateLimitError 并在此处本地定义 ---
+from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS, is_bse_code, is_st_stock, is_kc_cy_stock, normalize_stock_code
 
-logger = logging.getLogger(__name__)
+class RateLimitError(DataFetchError): pass
 
-SINA_REALTIME_ENDPOINT = "hq.sinajs.cn/list"
-TENCENT_REALTIME_ENDPOINT = "qt.gtimg.cn/q"
-
-
-# User-Agent 池，用于随机轮换
-USER_AGENTS = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-]
-
-
-# 缓存实时行情数据（避免重复请求）
-# TTL 设为 20 分钟 (1200秒)：
-# - 批量分析场景：通常 30 只股票在 5 分钟内分析完，20 分钟足够覆盖
-# - 实时性要求：股票分析不需要秒级实时数据，20 分钟延迟可接受
-# - 防封禁：减少 API 调用频率
-_realtime_cache: Dict[str, Any] = {
-    'data': None,
-    'timestamp': 0,
-    'ttl': 1200  # 20分钟缓存有效期
-}
-
-# ETF 实时行情缓存
-_etf_realtime_cache: Dict[str, Any] = {
-    'data': None,
-    'timestamp': 0,
-    'ttl': 1200  # 20分钟缓存有效期
-}
-
-
-def _is_etf_code(stock_code: str) -> bool:
-    """
-    判断代码是否为 ETF 基金
-    
-    ETF 代码规则：
-    - 上交所 ETF: 51xxxx, 52xxxx, 56xxxx, 58xxxx
-    - 深交所 ETF: 15xxxx, 16xxxx, 18xxxx
-    
-    Args:
-        stock_code: 股票/基金代码
-        
-    Returns:
-        True 表示是 ETF 代码，False 表示是普通股票代码
-    """
-    etf_prefixes = ('51', '52', '56', '58', '15', '16', '18')
-    code = stock_code.strip().split('.')[0]
-    return code.startswith(etf_prefixes) and len(code) == 6
-
+from .realtime_types import (
+    UnifiedRealtimeQuote, ChipDistribution, RealtimeSource,
+    get_realtime_circuit_breaker, get_chip_circuit_breaker,
+    safe_float, safe_int
+)
+from .us_index_mapping import is_us_index_code, is_us_stock_code
 
 def _is_hk_code(stock_code: str) -> bool:
     """
