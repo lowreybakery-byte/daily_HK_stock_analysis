@@ -40,12 +40,17 @@ from tenacity import (
 )
 
 from patch.eastmoney_patch import eastmoney_patch
-from src.config import get_config
-from .base import BaseFetcher, DataFetchError, RateLimitError, STANDARD_COLUMNS,is_bse_code, is_st_stock, is_kc_cy_stock, normalize_stock_code
+# 1. 修复导入语句，确保括号匹配
+from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS, is_bse_code, is_st_stock, is_kc_cy_stock, normalize_stock_code
+
+# 2. 定义缺失的异常类
+class RateLimitError(DataFetchError): pass
+
+# 3. 补全原本被你中断的导入语句
 from .realtime_types import (
     UnifiedRealtimeQuote, RealtimeSource,
     get_realtime_circuit_breaker,
-    safe_float, safe_int  # 使用统一的类型转换函数
+    safe_float, safe_int
 )
 
 
