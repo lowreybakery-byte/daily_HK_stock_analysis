@@ -6,7 +6,7 @@ import sys
 import time
 import uuid
 from datetime import datetime
-from typing import List, Optional, Tuple # 补全了这里
+from typing import List, Optional, Tuple, Dict, Any
 
 from src.config import get_config, Config
 from src.logging_config import setup_logging
@@ -22,7 +22,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--stocks', type=str, help='指定股票代码')
     parser.add_argument('--no-notify', action='store_true')
     parser.add_argument('--no-market-review', action='store_true')
-    parser.add_argument('--force-run', action='store_true')
+    parser.add_argument('--force-run', action='store_true', help='强制运行')
     return parser.parse_args()
 
 def run_full_analysis(config: Config, args: argparse.Namespace, stock_codes: Optional[List[str]] = None):
@@ -47,27 +47,28 @@ def run_full_analysis(config: Config, args: argparse.Namespace, stock_codes: Opt
         for code in stock_codes:
             try:
                 logger.info(f"正在处理股票: {code}")
-                # 核心：每只之间强制等待 15 秒，给 API 留出缓冲
+                # 强制等待 15 秒，给 API 留出缓冲
                 time.sleep(15)
                 
-                # 单独运行一只股票
+                # 单独运行一只股票，为了防止单只发送邮件太多，设为 False，由最后统一发送
                 res = pipeline.run(
                     stock_codes=[code], 
                     dry_run=False, 
-                    send_notification=not args.no_notify,
+                    send_notification=False, 
                     merge_notification=False
                 )
                 if res:
                     all_results.extend(res)
-                    logger.info(f"完成: {code}")
+                    logger.info(f"成功完成: {code}")
             except Exception as e:
                 logger.error(f"分析 {code} 失败，已跳过: {e}")
                 continue
 
-        # 汇总报告
+        # 汇总报告：所有分析完成后发送一封完整邮件
         if all_results and not args.no_notify:
             dashboard = pipeline.notifier.generate_aggregate_report(all_results, 'simple')
             pipeline.notifier.send(f"# 🚀 港股决策仪表盘\n\n{dashboard}", email_send_to_all=True)
+            logger.info("汇总邮件已发送")
 
         # 大盘复盘
         if config.market_review_enabled and not args.no_market_review:
