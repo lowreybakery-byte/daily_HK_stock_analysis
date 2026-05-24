@@ -25,8 +25,9 @@ from tenacity import (
 from patch.eastmoney_patch import eastmoney_patch
 from src.config import get_config
 
-# --- 关键修复：从 base 移除 RateLimitError 并在此处本地定义 ---
+# --- 关键修复：移除 RateLimitError 导入并在此处本地定义 ---
 from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS, is_bse_code, is_st_stock, is_kc_cy_stock, normalize_stock_code
+class RateLimitError(DataFetchError): pass
 
 class RateLimitError(DataFetchError): pass
 
