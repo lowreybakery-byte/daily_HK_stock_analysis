@@ -302,45 +302,72 @@ class YfinanceFetcher(BaseFetcher):
 
     def _fetch_yf_ticker_data(self, yf, yf_code: str, name: str, return_code: str) -> Optional[Dict[str, Any]]:
         """
-        通过 yfinance 拉取单个指数/股票的行情数据。
+        通过 yfinance 拉取单个指数/股票的最近两个有效交易日行情。
 
-        Args:
-            yf: yfinance 模块引用
-            yf_code: yfinance 使用的代码（如 '000001.SS'、'^GSPC'）
-            name: 指数显示名称
-            return_code: 写入结果 dict 的 code 字段（如 'sh000001'、'SPX'）
-
-        Returns:
-            行情字典，失败时返回 None
+        修复点：
+        - period='2d' 在休市日或部分港股指数上可能只返回 1 条记录，
+          进而把昨收误设为当日收盘，导致涨跌幅错误显示为 0.00%。
+        - 改为优先请求近 10 天，如有效交易日仍不足 2 天，再请求 1 个月。
+        - 返回 trade_date，供大盘复盘使用最近完整交易日而不是运行日期。
         """
         ticker = yf.Ticker(yf_code)
-        # 取近两日数据以计算涨跌幅
-        hist = ticker.history(period='2d')
-        if hist.empty:
+
+        def _load_valid_history(period: str) -> pd.DataFrame:
+            hist = ticker.history(period=period)
+            if hist is None or hist.empty:
+                return pd.DataFrame()
+            hist = hist.copy()
+            required = ['Open', 'High', 'Low', 'Close']
+            if any(col not in hist.columns for col in required):
+                return pd.DataFrame()
+            hist = hist.dropna(subset=['Close'])
+            return hist.sort_index()
+
+        hist = _load_valid_history('10d')
+        if len(hist) < 2:
+            hist = _load_valid_history('1mo')
+        if len(hist) < 2:
+            logger.warning(
+                f"[Yfinance] {name}({yf_code}) 有效交易日不足 2 条，无法可靠计算涨跌幅"
+            )
             return None
-        today_row = hist.iloc[-1]
-        prev_row = hist.iloc[-2] if len(hist) > 1 else today_row
-        price = float(today_row['Close'])
-        prev_close = float(prev_row['Close'])
+
+        latest_row = hist.iloc[-1]
+        previous_row = hist.iloc[-2]
+        price = float(latest_row['Close'])
+        prev_close = float(previous_row['Close'])
         change = price - prev_close
-        change_pct = (change / prev_close) * 100 if prev_close else 0
-        high = float(today_row['High'])
-        low = float(today_row['Low'])
-        # 振幅 = (最高 - 最低) / 昨收 * 100
-        amplitude = ((high - low) / prev_close * 100) if prev_close else 0
+        change_pct = (change / prev_close) * 100 if prev_close else 0.0
+        high = float(latest_row['High'])
+        low = float(latest_row['Low'])
+        amplitude = ((high - low) / prev_close * 100) if prev_close else 0.0
+
+        latest_index = hist.index[-1]
+        try:
+            trade_date = pd.Timestamp(latest_index).date().isoformat()
+        except Exception:
+            trade_date = ''
+
+        volume_value = latest_row.get('Volume', 0.0)
+        try:
+            volume = float(volume_value) if pd.notna(volume_value) else 0.0
+        except (TypeError, ValueError):
+            volume = 0.0
+
         return {
             'code': return_code,
             'name': name,
             'current': price,
             'change': change,
             'change_pct': change_pct,
-            'open': float(today_row['Open']),
+            'open': float(latest_row['Open']),
             'high': high,
             'low': low,
             'prev_close': prev_close,
-            'volume': float(today_row['Volume']),
+            'volume': volume,
             'amount': 0.0,  # Yahoo Finance 不提供准确成交额
             'amplitude': amplitude,
+            'trade_date': trade_date,
         }
 
     def get_main_indices(self, region: str = "cn") -> Optional[List[Dict[str, Any]]]:
