@@ -201,9 +201,8 @@ class YfinanceFetcher(BaseFetcher):
             if isinstance(e, DataFetchError):
                 raise
             raise DataFetchError(f"Yahoo Finance 获取数据失败: {e}") from e
-            
-            def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
-        
+
+    def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
         """
         标准化 Yahoo Finance 历史行情数据。
 
