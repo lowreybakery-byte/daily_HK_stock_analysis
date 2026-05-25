@@ -182,7 +182,7 @@ class YfinanceFetcher(BaseFetcher):
                 end=end_date,
                 progress=False,  # 禁止进度条
                 auto_adjust=True,  # 自动调整价格（复权）
-                multi_level_index=True
+                multi_level_index=False
             )
 
             # 筛选出 yf_code 的列, 避免多只股票数据混淆
