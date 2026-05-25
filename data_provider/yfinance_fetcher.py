@@ -202,64 +202,103 @@ class YfinanceFetcher(BaseFetcher):
                 raise
             raise DataFetchError(f"Yahoo Finance 获取数据失败: {e}") from e
 
-    def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
+ def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
         """
-        标准化 Yahoo Finance 数据
+        标准化 Yahoo Finance 历史行情数据。
 
-        yfinance 返回的列名：
-        Open, High, Low, Close, Volume（索引是日期）
-
-        注意：新版 yfinance 返回 MultiIndex 列名，如 ('Close', 'AMD')
-        需要先扁平化列名再进行处理
-
-        需要映射到标准列名：
-        date, open, high, low, close, volume, amount, pct_chg
+        兼容新版 yfinance 可能返回的：
+        - 普通单层列名：Open, High, Low, Close, Volume
+        - MultiIndex 列名：('Close', '1989.HK') 等
+        - 日期列名：Date、Datetime、date、datetime、index
         """
+        if df is None or df.empty:
+            raise DataFetchError(f"Yahoo Finance 未查询到 {stock_code} 的历史数据")
+
         df = df.copy()
 
-        # 处理 MultiIndex 列名（新版 yfinance 返回格式）
-        # 例如: ('Close', 'AMD') -> 'Close'
+        # 兼容新版 yfinance 的 MultiIndex 列名。
+        # 例如 ('Close', '1989.HK') -> 'Close'
         if isinstance(df.columns, pd.MultiIndex):
             logger.debug("检测到 MultiIndex 列名，进行扁平化处理")
-            # 取第一级列名（Price level: Close, High, Low, etc.）
-            df.columns = df.columns.get_level_values(0)
+            df.columns = [
+                str(col[0]).strip() if isinstance(col, tuple) else str(col).strip()
+                for col in df.columns
+            ]
+        else:
+            df.columns = [str(col).strip() for col in df.columns]
 
-        # 重置索引，将日期从索引变为列
+        # 将日期索引转换为普通列。
         df = df.reset_index()
 
-        # 列名映射（yfinance 使用首字母大写）
-        column_mapping = {
-            'Date': 'date',
-            'Open': 'open',
-            'High': 'high',
-            'Low': 'low',
-            'Close': 'close',
-            'Volume': 'volume',
-        }
+        # 兼容不同 yfinance 版本的列名大小写及日期列名称。
+        column_mapping = {}
+        for col in df.columns:
+            key = str(col).strip().lower()
+
+            if key in ("date", "datetime", "index"):
+                column_mapping[col] = "date"
+            elif key == "open":
+                column_mapping[col] = "open"
+            elif key == "high":
+                column_mapping[col] = "high"
+            elif key == "low":
+                column_mapping[col] = "low"
+            elif key == "close":
+                column_mapping[col] = "close"
+            elif key == "volume":
+                column_mapping[col] = "volume"
 
         df = df.rename(columns=column_mapping)
 
-        # 计算涨跌幅（因为 yfinance 不直接提供）
-        if 'close' in df.columns:
-            df['pct_chg'] = df['close'].pct_change() * 100
-            df['pct_chg'] = df['pct_chg'].fillna(0).round(2)
+        # 如果日期列名称仍不符合预期，尝试将 reset_index 后的第一列作为日期列处理。
+        if "date" not in df.columns and len(df.columns) > 0:
+            first_col = df.columns[0]
+            converted_date = pd.to_datetime(df[first_col], errors="coerce")
 
-        # 计算成交额（yfinance 不提供，使用估算值）
-        # 成交额 ≈ 成交量 * 平均价格
-        if 'volume' in df.columns and 'close' in df.columns:
-            df['amount'] = df['volume'] * df['close']
-        else:
-            df['amount'] = 0
+            if converted_date.notna().any():
+                df = df.rename(columns={first_col: "date"})
+                df["date"] = converted_date
 
-        # 添加股票代码列
-        df['code'] = stock_code
+        # 如果仍没有日期列，给出明确错误，而不是只报 KeyError: 'date'。
+        if "date" not in df.columns:
+            raise DataFetchError(
+                f"Yahoo Finance 返回数据缺少日期列: columns={list(df.columns)}"
+            )
 
-        # 只保留需要的列
-        keep_cols = ['code'] + STANDARD_COLUMNS
-        existing_cols = [col for col in keep_cols if col in df.columns]
-        df = df[existing_cols]
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
-        return df
+        # 检查技术分析所需的核心行情列。
+        required_cols = ["open", "high", "low", "close", "volume"]
+        missing_cols = [col for col in required_cols if col not in df.columns]
+
+        if missing_cols:
+            raise DataFetchError(
+                f"Yahoo Finance 返回数据缺少行情列: missing={missing_cols}, "
+                f"columns={list(df.columns)}"
+            )
+
+        # 统一转换为数值类型。
+        for col in required_cols:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        # 删除没有有效日期或收盘价的记录。
+        df = df.dropna(subset=["date", "close"])
+
+        if df.empty:
+            raise DataFetchError(f"Yahoo Finance 返回的 {stock_code} 历史数据无有效价格记录")
+
+        # 计算涨跌幅。
+        df["pct_chg"] = df["close"].pct_change() * 100
+        df["pct_chg"] = df["pct_chg"].fillna(0).round(2)
+
+        # Yahoo Finance 不提供准确成交额，使用收盘价 × 成交量估算。
+        df["amount"] = (df["volume"] * df["close"]).fillna(0)
+
+        # 添加股票代码列。
+        df["code"] = stock_code
+
+        # 返回系统要求的标准字段。
+        return df[["code"] + STANDARD_COLUMNS]
 
     def _fetch_yf_ticker_data(self, yf, yf_code: str, name: str, return_code: str) -> Optional[Dict[str, Any]]:
         """
