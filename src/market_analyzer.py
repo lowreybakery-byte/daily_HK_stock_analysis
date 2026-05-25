@@ -59,6 +59,7 @@ class MarketIndex:
     volume: float = 0.0          # 成交量（手）
     amount: float = 0.0          # 成交额（元）
     amplitude: float = 0.0       # 振幅(%)
+    trade_date: str = ""         # 最近完整交易日（YYYY-MM-DD）
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -73,13 +74,15 @@ class MarketIndex:
             'volume': self.volume,
             'amount': self.amount,
             'amplitude': self.amplitude,
+            'trade_date': self.trade_date,
         }
 
 
 @dataclass
 class MarketOverview:
     """市场概览数据"""
-    date: str                           # 日期
+    date: str                           # 行情对应的最近完整交易日
+    generated_date: str = ""            # 报告实际生成日期
     indices: List[MarketIndex] = field(default_factory=list)  # 主要指数
     up_count: int = 0                   # 上涨家数
     down_count: int = 0                 # 下跌家数
@@ -186,12 +189,46 @@ class MarketAnalyzer:
             return "🔴" if change_pct > 0 else "🟢"
         return "🟢" if change_pct > 0 else "🔴"
 
-    def _get_review_title(self, date: str) -> str:
+    @staticmethod
+    def _is_prior_session_review(overview: MarketOverview) -> bool:
+        """True when the report runs after the latest complete trading session."""
+        return bool(overview.generated_date and overview.date != overview.generated_date)
+
+    def _get_review_title(self, overview: MarketOverview) -> str:
+        suffix_zh = "（最近完整交易日）" if self._is_prior_session_review(overview) else ""
+        suffix_en = " (latest completed session)" if self._is_prior_session_review(overview) else ""
         if self._get_review_language() == "en":
             market_names = {"us": "US Market Recap", "hk": "HK Market Recap"}
             market_name = market_names.get(self.region, "A-share Market Recap")
-            return f"## {date} {market_name}"
-        return f"## {date} 大盘复盘"
+            return f"## {overview.date} {market_name}{suffix_en}"
+        return f"## {overview.date} 大盘复盘{suffix_zh}"
+
+    def _get_session_basis_note(self, overview: MarketOverview, language: str | None = None) -> str:
+        """Explain the time basis when a holiday/weekend run uses the last completed session."""
+        language = language or self._get_review_language()
+        if not self._is_prior_session_review(overview):
+            return ""
+        if language == "en":
+            return (
+                f"This report was generated on {overview.generated_date}; the market data below "
+                f"is based on the latest completed trading session, {overview.date}."
+            )
+        return (
+            f"报告生成日为 {overview.generated_date}；因当日无可用完整交易行情，"
+            f"以下复盘基于最近完整交易日 {overview.date}。"
+        )
+
+    def _get_session_word(self, overview: MarketOverview, language: str | None = None) -> str:
+        language = language or self._get_review_language()
+        if language == "en":
+            return "the latest completed session" if self._is_prior_session_review(overview) else "today's session"
+        return "最近交易日" if self._is_prior_session_review(overview) else "今日"
+
+    def _get_next_session_heading(self, overview: MarketOverview, language: str | None = None) -> str:
+        language = language or self._get_review_language()
+        if language == "en":
+            return "Next Session Trading Plan" if self._is_prior_session_review(overview) else "Next Trading Day Plan"
+        return "下一交易日交易计划" if self._is_prior_session_review(overview) else "明日交易计划"
 
     def _get_index_hint(self) -> str:
         if self._get_review_language() == "en":
@@ -302,11 +339,22 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         Returns:
             MarketOverview: 市场概览数据对象
         """
-        today = datetime.now().strftime('%Y-%m-%d')
-        overview = MarketOverview(date=today)
+        run_date = datetime.now().strftime('%Y-%m-%d')
+        overview = MarketOverview(date=run_date, generated_date=run_date)
         
-        # 1. 获取主要指数行情（按 region 切换 A 股/美股）
+        # 1. 获取主要指数行情（按 region 切换 A 股/美股/港股）
         overview.indices = self._get_main_indices()
+
+        # 指数行情可能来自上一完整交易日（例如周末或港股休市日）。
+        # 复盘日期应跟随行情数据，而不是跟随程序运行日期。
+        available_trade_dates = [idx.trade_date for idx in overview.indices if idx.trade_date]
+        if available_trade_dates:
+            overview.date = max(available_trade_dates)
+            if overview.date != overview.generated_date:
+                logger.info(
+                    "[大盘] 报告生成日 %s 无完整交易行情，复盘口径切换为最近交易日 %s",
+                    overview.generated_date, overview.date
+                )
 
         # 2. 获取涨跌统计（A 股有，美股无等效数据）
         if self.profile.has_market_stats:
@@ -346,7 +394,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                         prev_close=item['prev_close'],
                         volume=item['volume'],
                         amount=item['amount'],
-                        amplitude=item['amplitude']
+                        amplitude=item['amplitude'],
+                        trade_date=str(item.get('trade_date') or '')
                     )
                     indices.append(index)
 
@@ -912,6 +961,10 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
     def _build_review_prompt(self, overview: MarketOverview, news: List) -> str:
         """构建复盘报告 Prompt"""
         review_language = self._get_review_language()
+        session_basis_note = self._get_session_basis_note(overview, review_language)
+        session_word = self._get_session_word(overview, review_language)
+        next_session_heading = self._get_next_session_heading(overview, review_language)
+        review_title = self._get_review_title(overview).removeprefix('## ').strip()
 
         # 指数行情信息（简洁格式，不用emoji）
         indices_text = ""
@@ -989,7 +1042,7 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
             news_placeholder = news_text if news_text else "暂无相关新闻"
 
         if review_language == "en":
-            report_title = self._get_review_title(overview.date).removeprefix("## ").strip()
+            report_title = review_title
             return f"""You are a professional US/A/H market analyst. Please produce a concise market recap report based on the data below.
 
 [Requirements]
@@ -1001,9 +1054,10 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 
 ---
 
-# Today's Market Data
+# Market Data Basis
+{session_basis_note or 'The data below refers to the stated trading session.'}
 
-## Date
+## Trading Session Date
 {overview.date}
 
 ## Major Indices
@@ -1027,7 +1081,7 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 ## {report_title}
 
 ### 1. Market Summary
-(2-3 sentences summarizing overall market tone, index moves, and liquidity.)
+(2-3 sentences summarizing the stated trading session's market tone, index moves, and liquidity. Do not describe it as today when the basis note says it is a prior completed session.)
 
 ### 2. Index Commentary
 ({self._get_index_hint()})
@@ -1044,7 +1098,7 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 ### 6. Risk Alerts
 (List the main risks to monitor.)
 
-### 7. Strategy Plan
+### 7. {next_session_heading}
 (Provide an offensive/balanced/defensive stance, a position-sizing guideline, one invalidation trigger, and end with “For reference only, not investment advice.”)
 
 ---
@@ -1062,12 +1116,14 @@ Output the report content directly, no extra commentary.
 - emoji 仅在标题处少量使用（每个标题最多1个）
 - 报告要像交易员盘后工作台：先给结论，再按数据表、主线、催化、计划展开
 - 不要重复列出已由系统注入的表格数据；正文负责解释表格背后的含义
+- 必须遵守市场数据日期口径；若报告基于最近完整交易日，禁止写成‘今日交易’或‘明日计划’，应写‘最近交易日’与‘下一交易日’
 
 ---
 
-# 今日市场数据
+# 市场数据口径
+{session_basis_note or '以下数据对应所列交易日。'}
 
-## 日期
+## 交易日
 {overview.date}
 
 ## 主要指数
@@ -1088,12 +1144,12 @@ Output the report content directly, no extra commentary.
 
 # 输出格式模板（请严格按此格式输出）
 
-## {overview.date} 大盘复盘
+## {review_title}
 
-> 一句话给出今日市场状态、核心矛盾和明日优先观察方向。
+> 一句话给出{session_word}市场状态、核心矛盾和下一交易日优先观察方向。
 
 ### 一、盘面总览
-（2-3句话概括指数、涨跌家数、成交额和情绪温度，明确“强势/偏暖/震荡/偏弱”判断）
+（2-3句话概括{session_word}的指数、涨跌家数、成交额和情绪温度，明确“强势/偏暖/震荡/偏弱”判断）
 
 ### 二、指数结构
 （{self._get_index_hint()}，说明谁在护盘、谁在拖累，以及关键支撑/压力）
@@ -1107,7 +1163,7 @@ Output the report content directly, no extra commentary.
 ### 五、消息催化
 （结合近三日新闻，提炼真正影响明日交易的催化或扰动）
 
-### 六、明日交易计划
+### 六、{next_session_heading}
 （给出进攻/均衡/防守结论、仓位区间、关注方向、回避方向和一个触发失效条件）
 
 ### 七、风险提示
@@ -1155,6 +1211,10 @@ Output the report content directly, no extra commentary.
         separator = ", " if template_language == "en" else "、"
         top_text = separator.join([s['name'] for s in overview.top_sectors[:3]])
         bottom_text = separator.join([s['name'] for s in overview.bottom_sectors[:3]])
+        session_basis_note = self._get_session_basis_note(overview, template_language)
+        session_word = self._get_session_word(overview, template_language)
+        next_session_heading = self._get_next_session_heading(overview, template_language)
+        review_title = self._get_review_title(overview).removeprefix('## ').strip()
 
         if template_language == "en":
             stats_section = ""
@@ -1178,10 +1238,12 @@ Output the report content directly, no extra commentary.
 """
             market_names = {"us": "US Market Recap", "hk": "HK Market Recap"}
             market_name = market_names.get(self.region, "A-share Market Recap")
-            report = f"""## {overview.date} {market_name}
+            report = f"""## {review_title}
 
 ### 1. Market Summary
-Today's {self._get_market_scope_name(template_language)} showed **{market_mood}**.
+{session_basis_note or f'The stated trading session for the {self._get_market_scope_name(template_language)} showed **{market_mood}**.'}
+
+**Session performance**: **{market_mood}**.
 
 ### 2. Major Indices
 {indices_text or "- No index data available"}
@@ -1202,9 +1264,10 @@ Market conditions can change quickly. The data above is for reference only and d
         dashboard_block = self._build_stats_block(overview)
         indices_block = self._build_indices_block(overview)
         sector_block = self._build_sector_block(overview)
-        return f"""## {overview.date} 大盘复盘
+        basis_prefix = f"> {session_basis_note}\n\n" if session_basis_note else ""
+        return f"""## {review_title}
 
-> 今日{market_label}市场整体呈现**{market_mood}**态势，优先观察指数承接、成交额变化和板块持续性。
+{basis_prefix}> {session_word}{market_label}市场整体呈现**{market_mood}**态势，优先观察指数承接、成交额变化和板块持续性。
 
 ### 一、盘面总览
 {dashboard_block or "暂无市场宽度数据。"}
@@ -1221,7 +1284,7 @@ Market conditions can change quickly. The data above is for reference only and d
 ### 五、消息催化
 - 暂无可用新闻时，应降低对题材持续性的确定性判断。
 
-### 六、明日交易计划
+### 六、{next_session_heading}
 - **结论**：均衡观察。
 - **仓位**：控制在中性区间，等待指数与主线共振。
 - **关注方向**：{top_text or "强于指数的主线板块"}。
